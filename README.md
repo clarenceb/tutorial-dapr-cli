@@ -191,3 +191,9 @@ Cleanup
 az group delete \
     --resource-group $RESOURCE_GROUP
 ```
+
+Resources
+---------
+
+* https://docs.microsoft.com/en-us/azure/container-apps/microservices-dapr
+* https://github.com/dapr/quickstarts/tree/v1.4.0/hello-kubernetes
