@@ -144,7 +144,7 @@ Create some orders
 
 ```sh
 NODEAPP_INGRESS_URL=$(az containerapp show -n nodeapp -g $RESOURCE_GROUP --query configuration.ingress.fqdn -o tsv)
-curl --request POST --data "@sample.json" --header Content-Type:application/json $NODEAPP_INGRESS_URL/neworder
+curl --request POST --data "@sample.json" --header Content-Type:application/json https://$NODEAPP_INGRESS_URL/neworder
 
 curl $NODEAPP_INGRESS_URL/order
 
@@ -154,7 +154,7 @@ i=0
 while [[ $i -lt 20 ]]; do
     ordernum=$(openssl rand -hex 3)
     echo "Sending order ($i): $ordernum"
-    curl -i --request POST --data "{\"data\": {\"orderId\": \"$ordernum\"}}" --header Content-Type:application/json $NODEAPP_INGRESS_URL/neworder
+    curl -i --request POST --data "{\"data\": {\"orderId\": \"$ordernum\"}}" --header Content-Type:application/json https://$NODEAPP_INGRESS_URL/neworder
     let "i+=1"
 done
 ```
