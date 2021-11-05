@@ -7,9 +7,9 @@ Setup base resources
 ```sh
 RESOURCE_GROUP="containerapps"
 LOCATION="canadacentral"
-CONTAINERAPPS_ENVIRONMENT="containerapps-env"
-LOG_ANALYTICS_WORKSPACE="containerapps-logs"
-ACR_NAME=containerappsreg
+CONTAINERAPPS_ENVIRONMENT="containerapps"
+LOG_ANALYTICS_WORKSPACE="logs-${CONTAINERAPPS_ENVIRONMENT}"
+ACR_NAME="containerappsreg"
 STORAGE_ACCOUNT_CONTAINER="mycontainer"
 STORAGE_ACCOUNT="containerapps$(openssl rand -hex 5)"
 
@@ -24,20 +24,11 @@ az group create \
   --name $RESOURCE_GROUP \
   --location "$LOCATION"
 
-az monitor log-analytics workspace create \
-  --resource-group $RESOURCE_GROUP \
-  --workspace-name $LOG_ANALYTICS_WORKSPACE
-
-LOG_ANALYTICS_WORKSPACE_CLIENT_ID=`az monitor log-analytics workspace show --query customerId -g $RESOURCE_GROUP -n $LOG_ANALYTICS_WORKSPACE --out tsv`
-
-LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET=`az monitor log-analytics workspace get-shared-keys --query primarySharedKey -g $RESOURCE_GROUP -n $LOG_ANALYTICS_WORKSPACE --out tsv`
-
-az containerapp env create \
-  --name $CONTAINERAPPS_ENVIRONMENT \
-  --resource-group $RESOURCE_GROUP \
-  --logs-workspace-id $LOG_ANALYTICS_WORKSPACE_CLIENT_ID \
-  --logs-workspace-key $LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET \
-  --location "$LOCATION"
+az deployment group create \
+  --name env-create \
+  -g $RESOURCE_GROUP \
+  --template-file ./environment.bicep \
+  --parameters environmentName=$CONTAINERAPPS_ENVIRONMENT
 
 az storage account create \
   --name $STORAGE_ACCOUNT \
@@ -46,8 +37,9 @@ az storage account create \
   --sku Standard_RAGRS \
   --kind StorageV2
 
-STORAGE_ACCOUNT_KEY=`az storage account keys list --resource-group $RESOURCE_GROUP --account-name $STORAGE_ACCOUNT --query '[0].value' --out tsv`
-echo $STORAGE_ACCOUNT_KEY
+STORAGE_ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP --account-name $STORAGE_ACCOUNT --query '[0].value' --out tsv)
+
+LOG_ANALYTICS_WORKSPACE_CLIENT_ID=$(az monitor log-analytics workspace show --query customerId -g $RESOURCE_GROUP -n $LOG_ANALYTICS_WORKSPACE --out tsv)
 ```
 
 Configure the state store component for Dapr
@@ -135,7 +127,7 @@ az containerapp list -o table
 
 az monitor log-analytics query \
   --workspace $LOG_ANALYTICS_WORKSPACE_CLIENT_ID \
-  --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20" \
+  --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20" \
   --out table
 ```
 
@@ -143,18 +135,18 @@ Create some orders
 ------------------
 
 ```sh
-NODEAPP_INGRESS_URL=$(az containerapp show -n nodeapp -g $RESOURCE_GROUP --query configuration.ingress.fqdn -o tsv)
-curl --request POST --data "@sample.json" --header Content-Type:application/json https://$NODEAPP_INGRESS_URL/neworder
+NODEAPP_INGRESS_URL="https://$(az containerapp show -n nodeapp -g $RESOURCE_GROUP --query configuration.ingress.fqdn -o tsv)"
+curl -i --request POST --data "@sample.json" --header Content-Type:application/json $NODEAPP_INGRESS_URL/neworder
 
-curl $NODEAPP_INGRESS_URL/order
+curl -s $NODEAPP_INGRESS_URL/order | jq
 
-watch -n 5 az monitor log-analytics query --workspace $LOG_ANALYTICS_WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
+watch -n 5 az monitor log-analytics query --workspace $LOG_ANALYTICS_WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
 
 i=0
 while [[ $i -lt 20 ]]; do
     ordernum=$(openssl rand -hex 3)
     echo "Sending order ($i): $ordernum"
-    curl -i --request POST --data "{\"data\": {\"orderId\": \"$ordernum\"}}" --header Content-Type:application/json https://$NODEAPP_INGRESS_URL/neworder
+    curl -i --request POST --data "{\"data\": {\"orderId\": \"$ordernum\"}}" --header Content-Type:application/json $NODEAPP_INGRESS_URL/neworder
     let "i+=1"
 done
 ```
@@ -183,6 +175,14 @@ az containerapp update \
 
 In the Azure Portal, split traffic 50% to v1 and v2 and send some orders.
 Inspect the logs to see round-robin between the two revisions.
+
+Application Insights
+--------------------
+
+After creating some orders, check the App Insights resource.
+
+* Application Map
+* Performance
 
 Cleanup
 -------
