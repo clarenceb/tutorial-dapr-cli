@@ -106,6 +106,7 @@ az containerapp create \
   --dapr-app-id nodeapp \
   --dapr-components ./components.yaml
 
+az containerapp list -o table
 az containerapp revision list -n nodeapp -g $RESOURCE_GROUP -o table
 ```
 
@@ -124,6 +125,7 @@ az containerapp create \
   --dapr-app-id pythonapp
 
 az containerapp list -o table
+az containerapp revision list -n pythonapp -g $RESOURCE_GROUP -o table
 
 az monitor log-analytics query \
   --workspace $LOG_ANALYTICS_WORKSPACE_CLIENT_ID \
@@ -186,6 +188,15 @@ After creating some orders, check the App Insights resource.
 
 Cleanup
 -------
+
+Cleanup container apps to restart the demo (retaining enviornment and other resources):
+
+```sh
+az containerapp delete --name pythonapp --resource-group $RESOURCE_GROUP
+az containerapp delete --name nodeapp --resource-group $RESOURCE_GROUP
+```
+
+or full cleanup:
 
 ```sh
 az group delete \
