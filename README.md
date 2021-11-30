@@ -5,13 +5,9 @@ Setup base resources
 --------------------
 
 ```sh
-RESOURCE_GROUP="containerapps"
+RESOURCE_GROUP="containerappsdemo"
 LOCATION="canadacentral"
 CONTAINERAPPS_ENVIRONMENT="containerapps"
-LOG_ANALYTICS_WORKSPACE="logs-${CONTAINERAPPS_ENVIRONMENT}"
-ACR_NAME="containerappsreg"
-STORAGE_ACCOUNT_CONTAINER="mycontainer"
-STORAGE_ACCOUNT="containerapps$(openssl rand -hex 5)"
 
 az login
 
@@ -30,16 +26,38 @@ az deployment group create \
   --template-file ./environment.bicep \
   --parameters environmentName=$CONTAINERAPPS_ENVIRONMENT
 
-az storage account create \
-  --name $STORAGE_ACCOUNT \
-  --resource-group $RESOURCE_GROUP \
-  --location "$LOCATION" \
-  --sku Standard_RAGRS \
-  --kind StorageV2
+DEPLOY_OUTPUTS=$(az deployment group show --name env-create   -g $RESOURCE_GROUP --query properties.outputs)
 
-STORAGE_ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP --account-name $STORAGE_ACCOUNT --query '[0].value' --out tsv)
+ACR_USERNAME=$(echo $DEPLOY_OUTPUTS | jq -r .acrUserName.value)
+ACR_PASSWORD=$(echo $DEPLOY_OUTPUTS | jq -r .acrPassword.value)
+ACR_LOGIN_SERVER=$(echo $DEPLOY_OUTPUTS | jq -r .acrloginServer.value)
+ACR_NAME=$(echo $ACR_LOGIN_SERVER | cut -f1,1 -d .)
+WORKSPACE_CLIENT_ID=$(echo $DEPLOY_OUTPUTS | jq -r .workspaceId.value)
+STORAGE_ACCOUNT_NAME=$(echo $DEPLOY_OUTPUTS | jq -r .storageAccountName.value)
+STORAGE_ACCOUNT_KEY=$(echo $DEPLOY_OUTPUTS | jq -r .storageAccountKey.value)
+STORAGE_ACCOUNT_CONTAINER="mycontainer"
+```
 
-LOG_ANALYTICS_WORKSPACE_CLIENT_ID=$(az monitor log-analytics workspace show --query customerId -g $RESOURCE_GROUP -n $LOG_ANALYTICS_WORKSPACE --out tsv)
+Create new node app image (for dislpay custom message showing the app version)
+------------------------------------------------------------------------------
+
+```sh
+pushd ~
+
+git clone https://github.com/clarenceb/quickstarts dapr-quickstarts
+cd dapr-quickstarts/hello-kubernetes/node
+
+az acr build --image hello-k8s-node:v2 \
+  --registry $ACR_NAME \
+  --file Dockerfile .
+
+cd ../python
+
+az acr build --image hello-k8s-python:v2 \
+  --registry $ACR_NAME \
+  --file Dockerfile .
+
+popd
 ```
 
 Configure the state store component for Dapr
@@ -56,32 +74,12 @@ cat << EOF > ./components.yaml
   # should be securely stored. For more information, see
   # https://docs.dapr.io/operations/components/component-secrets
   - name: accountName
-    value: $STORAGE_ACCOUNT
+    value: $STORAGE_ACCOUNT_NAME
   - name: accountKey
     value: $STORAGE_ACCOUNT_KEY
   - name: containerName
     value: $STORAGE_ACCOUNT_CONTAINER
 EOF
-```
-
-Create new node app image (for custom message)
-----------------------------------------------
-
-```sh
-pushd ~
-
-git clone https://github.com/clarenceb/quickstarts dapr-quickstarts
-cd dapr-quickstarts/hello-kubernetes/node
-
-az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic --admin-enabled true
-ACR_USERNAME=$(az acr credential show --resource-group $RESOURCE_GROUP --name $ACR_NAME --query username -o tsv)
-ACR_PASSWORD=$(az acr credential show --resource-group $RESOURCE_GROUP --name $ACR_NAME --query passwords[0].value -o tsv)
-
-az acr build --image hello-k8s-node:v2 \
-  --registry $ACR_NAME \
-  --file Dockerfile .
-
-popd
 ```
 
 Deploy the service application (HTTP web server)
@@ -92,8 +90,8 @@ az containerapp create \
   --name nodeapp \
   --resource-group $RESOURCE_GROUP \
   --environment $CONTAINERAPPS_ENVIRONMENT \
-  --image $ACR_NAME.azurecr.io/hello-k8s-node:v2 \
-  --registry-login-server $ACR_NAME.azurecr.io \
+  --image $ACR_LOGIN_SERVER/hello-k8s-node:v2 \
+  --registry-login-server $ACR_LOGIN_SERVER \
   --registry-username $ACR_USERNAME \
   --registry-password $ACR_PASSWORD \
   --environment-variables MESSAGE=v1 \
@@ -102,7 +100,7 @@ az containerapp create \
   --min-replicas 1 \
   --max-replicas 1 \
   --enable-dapr \
-  --dapr-app-port 3500 \
+  --dapr-app-port 3000 \
   --dapr-app-id nodeapp \
   --dapr-components ./components.yaml
 
@@ -113,12 +111,17 @@ az containerapp revision list -n nodeapp -g $RESOURCE_GROUP -o table
 Deploy the client application (headless client)
 -----------------------------------------------
 
+The [Python App](https://github.com/dapr/quickstarts/tree/master/hello-kubernetes/python) will invoke the NodeApp every second via it's Dapr sidecar via the URI: `http://localhost:{DAPR_PORT}/v1.0/invoke/nodeapp/method/neworder`
+
 ```sh
 az containerapp create \
   --name pythonapp \
   --resource-group $RESOURCE_GROUP \
   --environment $CONTAINERAPPS_ENVIRONMENT \
-  --image dapriosamples/hello-k8s-python:latest \
+  --image $ACR_LOGIN_SERVER/hello-k8s-python:v2 \
+  --registry-login-server $ACR_LOGIN_SERVER \
+  --registry-username $ACR_USERNAME \
+  --registry-password $ACR_PASSWORD \
   --min-replicas 1 \
   --max-replicas 1 \
   --enable-dapr \
@@ -126,11 +129,6 @@ az containerapp create \
 
 az containerapp list -o table
 az containerapp revision list -n pythonapp -g $RESOURCE_GROUP -o table
-
-az monitor log-analytics query \
-  --workspace $LOG_ANALYTICS_WORKSPACE_CLIENT_ID \
-  --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20" \
-  --out table
 ```
 
 Create some orders
@@ -142,7 +140,12 @@ curl -i --request POST --data "@sample.json" --header Content-Type:application/j
 
 curl -s $NODEAPP_INGRESS_URL/order | jq
 
-watch -n 5 az monitor log-analytics query --workspace $LOG_ANALYTICS_WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
+az monitor log-analytics query \
+  --workspace $WORKSPACE_CLIENT_ID \
+  --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20" \
+  --out table
+
+watch -n 5 az monitor log-analytics query --workspace $WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
 
 i=0
 while [[ $i -lt 20 ]]; do
@@ -160,8 +163,8 @@ Deploy v2 of nodeapp
 az containerapp update \
   --name nodeapp \
   --resource-group $RESOURCE_GROUP \
-  --image $ACR_NAME.azurecr.io/hello-k8s-node:v2 \
-  --registry-login-server $ACR_NAME.azurecr.io \
+  --image $ACR_LOGIN_SERVER/hello-k8s-node:v2 \
+  --registry-login-server $ACR_LOGIN_SERVER \
   --registry-username $ACR_USERNAME \
   --registry-password $ACR_PASSWORD \
   --environment-variables MESSAGE=v2 \
@@ -170,7 +173,7 @@ az containerapp update \
   --min-replicas 1 \
   --max-replicas 1 \
   --enable-dapr \
-  --dapr-app-port 3500 \
+  --dapr-app-port 3000 \
   --dapr-app-id nodeapp \
   --dapr-components ./components.yaml
 ```
@@ -192,15 +195,16 @@ Cleanup
 Cleanup container apps to restart the demo (retaining enviornment and other resources):
 
 ```sh
-az containerapp delete --name pythonapp --resource-group $RESOURCE_GROUP
-az containerapp delete --name nodeapp --resource-group $RESOURCE_GROUP
+az containerapp delete --name pythonapp --resource-group $RESOURCE_GROUP --yes
+az containerapp delete --name nodeapp --resource-group $RESOURCE_GROUP --yes
 ```
 
 or full cleanup:
 
 ```sh
 az group delete \
-    --resource-group $RESOURCE_GROUP
+    --resource-group $RESOURCE_GROUP \
+    --yes
 ```
 
 Resources

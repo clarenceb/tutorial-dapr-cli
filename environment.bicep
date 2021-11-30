@@ -1,7 +1,14 @@
+@description('Provide a name for the Container Apps Environment')
 param environmentName string
-param logAnalyticsWorkspaceName string = 'logs-${environmentName}'
-param appInsightsName string = 'appins-${environmentName}'
+
+@description('Provide a location for the Container Apps resources')
 param location string = resourceGroup().location
+
+var suffix = '${take(uniqueString(resourceGroup().id, environmentName), 5)}'
+var logAnalyticsWorkspaceName = 'logs-${environmentName}'
+var appInsightsName = 'appins-${environmentName}'
+var storageAccountName = '${environmentName}${suffix}'
+var acrName = '${environmentName}${suffix}'
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2020-08-01' = {
   name: logAnalyticsWorkspaceName
@@ -50,5 +57,43 @@ resource environment 'Microsoft.Web/kubeEnvironments@2021-02-01' = {
   }
 }
 
-output location string = location
+resource blobstore 'Microsoft.Storage/storageAccounts@2021-06-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+}
+
+resource acr 'Microsoft.ContainerRegistry/registries@2021-08-01-preview' = {
+  name: acrName
+  location: location
+  sku: {
+    name: 'Basic'
+  }
+  properties: {
+    adminUserEnabled: true
+  }
+}
+
+@description('Container Apps Environment ID')
 output environmentId string = environment.id
+
+@description('Blob storage account name')
+output storageAccountName string = blobstore.name
+
+@description('Blob storage account key')
+output storageAccountKey string = blobstore.listKeys().keys[0].value
+
+@description('Log Analytics workspace ID')
+output workspaceId string = logAnalyticsWorkspace.properties.customerId
+
+@description('Container Registry admin username')
+output acrUserName string = acr.listCredentials().username
+
+@description('Container Registry admin password')
+output acrPassword string = acr.listCredentials().passwords[0].value
+
+@description('Container Registry login server')
+output acrloginServer string = acr.properties.loginServer
