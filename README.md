@@ -45,8 +45,8 @@ STORAGE_ACCOUNT_KEY=$(echo $DEPLOY_OUTPUTS | jq -r .storageAccountKey.value)
 STORAGE_ACCOUNT_CONTAINER="mycontainer"
 ```
 
-Create new node app image (for dislpay custom message showing the app version)
-------------------------------------------------------------------------------
+Create new node app image (for displaying a custom message showing the app version)
+-----------------------------------------------------------------------------------
 
 ```sh
 pushd ~
@@ -153,6 +153,8 @@ az monitor log-analytics query \
   --out table
 
 watch -n 5 az monitor log-analytics query --workspace $WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
+
+# Note: There is some latency is logs appearing via the CLI.  The logs will appear sooner in the Azure Portal so use that to check over the CLI.
 
 URL=$NODEAPP_INGRESS_URL/neworder k6 run k6-script.js
 ```
