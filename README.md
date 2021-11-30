@@ -1,6 +1,13 @@
 Microservices with Dapr using the CLI
 =====================================
 
+Prerequisites
+-------------
+
+* [Azure Subscription](https://azure.microsoft.com/en-au/free/)
+* [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
+* [k6](https://k6.io/docs/getting-started/installation/) for generating orders
+
 Setup base resources
 --------------------
 
@@ -147,13 +154,7 @@ az monitor log-analytics query \
 
 watch -n 5 az monitor log-analytics query --workspace $WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
 
-i=0
-while [[ $i -lt 20 ]]; do
-    ordernum=$(openssl rand -hex 3)
-    echo "Sending order ($i): $ordernum"
-    curl -i --request POST --data "{\"data\": {\"orderId\": \"$ordernum\"}}" --header Content-Type:application/json $NODEAPP_INGRESS_URL/neworder
-    let "i+=1"
-done
+URL=$NODEAPP_INGRESS_URL/neworder k6 run k6-script.js
 ```
 
 Deploy v2 of nodeapp
@@ -179,7 +180,16 @@ az containerapp update \
 ```
 
 In the Azure Portal, split traffic 50% to v1 and v2 and send some orders.
+
+```sh
+URL=$NODEAPP_INGRESS_URL/neworder k6 run k6-script.js
+```
+
 Inspect the logs to see round-robin between the two revisions.
+
+```sh
+watch -n 5 az monitor log-analytics query --workspace $WORKSPACE_CLIENT_ID --analytics-query "\"ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'nodeapp' and (Log_s contains 'persisted' or Log_s contains 'order') | where TimeGenerated >= ago(30m) | project ContainerAppName_s, Log_s, TimeGenerated | order by TimeGenerated desc | take 20\"" --out table
+```
 
 Application Insights
 --------------------
