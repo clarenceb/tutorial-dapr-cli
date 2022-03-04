@@ -12,16 +12,17 @@ Setup base resources
 --------------------
 
 ```sh
-RESOURCE_GROUP="containerappsdemo"
+RESOURCE_GROUP="containerapps"
 LOCATION="canadacentral"
 CONTAINERAPPS_ENVIRONMENT="containerapps"
 
 az login
 
 az extension add \
-  --source https://workerappscliextension.blob.core.windows.net/azure-cli-extension/containerapp-0.2.0-py2.py3-none-any.whl
+  --source https://workerappscliextension.blob.core.windows.net/azure-cli-extension/containerapp-0.2.3-py2.py3-none-any.whl
 
-az provider register --namespace Microsoft.Web
+az provider register --namespace Microsoft.App
+az provider show -n Microsoft.App --query registrationState
 
 az group create \
   --name $RESOURCE_GROUP \
@@ -93,6 +94,8 @@ Deploy the service application (HTTP web server)
 ------------------------------------------------
 
 ```sh
+# TODO: Wait for Azure CLI update to match container app ARM migration, see: aka.ms/microsoftappmigration
+# See: https://github.com/microsoft/azure-container-apps/issues/109
 az containerapp create \
   --name nodeapp \
   --resource-group $RESOURCE_GROUP \
@@ -113,6 +116,24 @@ az containerapp create \
 
 az containerapp list -o table
 az containerapp revision list -n nodeapp -g $RESOURCE_GROUP -o table
+
+# Alternatively, create via Bicep template
+az deployment group create \
+  --name nodeapp-v1 \
+  -g $RESOURCE_GROUP \
+  --template-file ./nodeapp-containerapp.bicep \
+  --parameters environment_name=$CONTAINERAPPS_ENVIRONMENT \
+    storage_account_name=$STORAGE_ACCOUNT_NAME \
+    storage_account_key=$STORAGE_ACCOUNT_KEY \
+    storage_container_name=$STORAGE_ACCOUNT_CONTAINER \
+    custom_message="v1" \
+    image_name="$ACR_LOGIN_SERVER/hello-k8s-node:v2" \
+    registry_login_server=$ACR_LOGIN_SERVER \
+    registry_username=$ACR_USERNAME \
+    registry_password=$ACR_PASSWORD
+
+az resource show -g $RESOURCE_GROUP --resource-type='Microsoft.App/containerApps' -n 'nodeapp' \
+  | jq '. | {name: .name, resourceGroup: .resourceGroup, provisioningState: .properties.provisioningState}'
 ```
 
 Deploy the client application (headless client)
@@ -121,6 +142,8 @@ Deploy the client application (headless client)
 The [Python App](https://github.com/dapr/quickstarts/tree/master/hello-kubernetes/python) will invoke the NodeApp every second via it's Dapr sidecar via the URI: `http://localhost:{DAPR_PORT}/v1.0/invoke/nodeapp/method/neworder`
 
 ```sh
+# TODO: Wait for Azure CLI update to match container app ARM migration, see: aka.ms/microsoftappmigration
+# See: https://github.com/microsoft/azure-container-apps/issues/109
 az containerapp create \
   --name pythonapp \
   --resource-group $RESOURCE_GROUP \
@@ -136,13 +159,30 @@ az containerapp create \
 
 az containerapp list -o table
 az containerapp revision list -n pythonapp -g $RESOURCE_GROUP -o table
+
+NODEAPP_INGRESS_URL="https://$(az containerapp show -n nodeapp -g $RESOURCE_GROUP --query configuration.ingress.fqdn -o tsv)"
+
+# Alternatively, create via Bicep template
+az deployment group create \
+  --name pythonapp \
+  -g $RESOURCE_GROUP \
+  --template-file ./pythonapp-containerapp.bicep \
+  --parameters environment_name=$CONTAINERAPPS_ENVIRONMENT \
+    image_name="$ACR_LOGIN_SERVER/hello-k8s-python:v2" \
+    registry_login_server=$ACR_LOGIN_SERVER \
+    registry_username=$ACR_USERNAME \
+    registry_password=$ACR_PASSWORD
+
+az resource show -g $RESOURCE_GROUP --resource-type='Microsoft.App/containerApps' -n 'pythonapp' \
+  | jq '. | {name: .name, resourceGroup: .resourceGroup, provisioningState: .properties.provisioningState}'
+
+NODEAPP_INGRESS_URL="https://$(az resource show -g $RESOURCE_GROUP --resource-type='Microsoft.App/containerApps' -n 'nodeapp'   | jq -r '.properties.configuration.ingress.fqdn')"
 ```
 
 Create some orders
 ------------------
 
 ```sh
-NODEAPP_INGRESS_URL="https://$(az containerapp show -n nodeapp -g $RESOURCE_GROUP --query configuration.ingress.fqdn -o tsv)"
 curl -i --request POST --data "@sample.json" --header Content-Type:application/json $NODEAPP_INGRESS_URL/neworder
 
 curl -s $NODEAPP_INGRESS_URL/order | jq
@@ -163,6 +203,8 @@ Deploy v2 of nodeapp
 --------------------
 
 ```sh
+# TODO: Wait for Azure CLI update to match container app ARM migration, see: aka.ms/microsoftappmigration
+# See: https://github.com/microsoft/azure-container-apps/issues/109
 az containerapp update \
   --name nodeapp \
   --resource-group $RESOURCE_GROUP \
@@ -179,6 +221,27 @@ az containerapp update \
   --dapr-app-port 3000 \
   --dapr-app-id nodeapp \
   --dapr-components ./components.yaml
+
+az containerapp list -o table
+az containerapp revision list -n nodeapp -g $RESOURCE_GROUP -o table
+
+# Alternatively, create via Bicep template
+az deployment group create \
+  --name nodeapp-v2 \
+  -g $RESOURCE_GROUP \
+  --template-file ./nodeapp-containerapp.bicep \
+  --parameters environment_name=$CONTAINERAPPS_ENVIRONMENT \
+    storage_account_name=$STORAGE_ACCOUNT_NAME \
+    storage_account_key=$STORAGE_ACCOUNT_KEY \
+    storage_container_name=$STORAGE_ACCOUNT_CONTAINER \
+    custom_message="v2" \
+    image_name="$ACR_LOGIN_SERVER/hello-k8s-node:v2" \
+    registry_login_server=$ACR_LOGIN_SERVER \
+    registry_username=$ACR_USERNAME \
+    registry_password=$ACR_PASSWORD
+
+az resource show -g $RESOURCE_GROUP --resource-type='Microsoft.App/containerApps' -n 'nodeapp' \
+  | jq '. | {name: .name, resourceGroup: .resourceGroup, provisioningState: .properties.provisioningState}'
 ```
 
 In the Azure Portal, split traffic 50% to v1 and v2 and send some orders.
@@ -207,8 +270,14 @@ Cleanup
 Cleanup container apps to restart the demo (retaining enviornment and other resources):
 
 ```sh
+# TODO: Wait for Azure CLI update to match container app ARM migration, see: aka.ms/microsoftappmigration
+# See: https://github.com/microsoft/azure-container-apps/issues/109
 az containerapp delete --name pythonapp --resource-group $RESOURCE_GROUP --yes
 az containerapp delete --name nodeapp --resource-group $RESOURCE_GROUP --yes
+
+# Alternatively, delete container app resources another way
+az resource delete --name nodeapp --resource-group $RESOURCE_GROUP --resource-type='Microsoft.App/containerApps' --latest-include-preview
+az resource delete --name pythonapp --resource-group $RESOURCE_GROUP --resource-type='Microsoft.App/containerApps' --latest-include-preview
 ```
 
 or full cleanup:
@@ -222,5 +291,7 @@ az group delete \
 Resources
 ---------
 
-* https://docs.microsoft.com/en-us/azure/container-apps/microservices-dapr
-* https://github.com/dapr/quickstarts/tree/v1.4.0/hello-kubernetes
+* [Tutorial: Deploy a Dapr application to Azure Container Apps using the Azure CLI](https://docs.microsoft.com/en-us/azure/container-apps/microservices-dapr)
+* [Hello Kubernetes](https://github.com/dapr/quickstarts/tree/v1.4.0/hello-kubernetes) - Dapr quickstart
+* [Action Required: Namespace migration from Microsoft.Web to Microsoft.App in March 2022](https://github.com/microsoft/azure-container-apps/issues/109)
+* [Container Apps Preview ARM template API specification](https://docs.microsoft.com/en-us/azure/container-apps/azure-resource-manager-api-spec)
