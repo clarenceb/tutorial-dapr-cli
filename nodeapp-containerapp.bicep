@@ -1,15 +1,6 @@
 @description('Container apps environment name')
 param environment_name string
 
-@description('Storage account name')
-param storage_account_name string
-
-@description('Storage account key')
-param storage_account_key string
-
-@description('Storage contrainer name')
-param storage_container_name string
-
 @description('Custom message for the app')
 param custom_message string = 'nodeapp'
 
@@ -42,11 +33,13 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
         allowInsecure: false
       }
 
+      // dapr: {
+      //   enabled: true
+      //   appPort: 3000
+      //   appProtocol: 'http'
+      // }
+
       secrets: [
-        {
-          name: 'storage-key'
-          value: storage_account_key
-        }
         {
           name: 'registry-password'
           value: registry_password
@@ -72,6 +65,10 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
               name: 'MESSAGE'
               value: custom_message
             }
+            {
+              name: 'PERSIST_ORDERS'
+              value: 'false'
+            }
           ]
           resources: {
             cpu: '0.5'
@@ -83,34 +80,6 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
         minReplicas: 1
         maxReplicas: 1
       }
-      dapr: {
-        enabled: true
-        appPort: 3000
-        appId: 'nodeapp'
-        components: [
-          {
-            name: 'statestore'
-            type: 'state.azure.blobstorage'
-            version: 'v1'
-            metadata: [
-                {
-                    name: 'accountName'
-                    value: storage_account_name
-                }
-                {
-                    name: 'accountKey'
-                    secretRef: 'storage-key'
-                }
-                {
-                    name: 'containerName'
-                    value: storage_container_name
-                }
-            ]
-          }
-        ]
-      }
     }
   }
 }
-
-

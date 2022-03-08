@@ -16,6 +16,9 @@ param registry_password string
 @description('Provide a location for the Container Apps resources')
 param location string = resourceGroup().location
 
+@description('Provide a URL for the nodeapp new order endpoint')
+param nodeapp_url string = ''
+
 resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
   name: 'pythonapp'
   location: location
@@ -24,6 +27,12 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
     managedEnvironmentId: resourceId('Microsoft.App/managedEnvironments', environment_name)
 
     configuration: {
+
+      // dapr: {
+      //   enabled: true
+      //   appProtocol: 'http'
+      // }
+      
       secrets: [
         {
           name: 'registry-password'
@@ -45,6 +54,12 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
         {
           image: image_name
           name: 'pythonapp'
+          env: [
+            {
+              name: 'NODEAPP_URL'
+              value: nodeapp_url
+            }
+          ]
           resources: {
             cpu: '0.5'
             memory: '1Gi'
@@ -54,10 +69,6 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
       scale: {
         minReplicas: 1
         maxReplicas: 1
-      }
-      dapr: {
-        enabled: true
-        appId: 'pythonapp'
       }
     }
   }

@@ -7,8 +7,18 @@ param location string = resourceGroup().location
 var suffix = '${take(uniqueString(resourceGroup().id, environmentName), 5)}'
 var logAnalyticsWorkspaceName = 'logs-${environmentName}'
 var appInsightsName = 'appins-${environmentName}'
-var storageAccountName = '${environmentName}${suffix}'
 var acrName = '${environmentName}${suffix}'
+
+resource acr 'Microsoft.ContainerRegistry/registries@2021-08-01-preview' = {
+  name: acrName
+  location: location
+  sku: {
+    name: 'Basic'
+  }
+  properties: {
+    adminUserEnabled: true
+  }
+}
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2020-08-01' = {
   name: logAnalyticsWorkspaceName
@@ -41,9 +51,10 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02-preview' = {
 resource environment 'Microsoft.App/managedEnvironments@2022-01-01-preview' = {
   name: environmentName
   location: location
+
   properties: {
-    type: 'managed'
-    internalLoadBalancerEnabled: false
+    daprAIInstrumentationKey: appInsights.properties.InstrumentationKey
+    
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
@@ -51,40 +62,11 @@ resource environment 'Microsoft.App/managedEnvironments@2022-01-01-preview' = {
         sharedKey: logAnalyticsWorkspace.listKeys().primarySharedKey
       }
     }
-    containerAppsConfiguration: {
-      daprAIInstrumentationKey: appInsights.properties.InstrumentationKey
-    }
-  }
-}
-
-resource blobstore 'Microsoft.Storage/storageAccounts@2021-06-01' = {
-  name: storageAccountName
-  location: location
-  kind: 'StorageV2'
-  sku: {
-    name: 'Standard_LRS'
-  }
-}
-
-resource acr 'Microsoft.ContainerRegistry/registries@2021-08-01-preview' = {
-  name: acrName
-  location: location
-  sku: {
-    name: 'Basic'
-  }
-  properties: {
-    adminUserEnabled: true
   }
 }
 
 @description('Container Apps Environment ID')
 output environmentId string = environment.id
-
-@description('Blob storage account name')
-output storageAccountName string = blobstore.name
-
-@description('Blob storage account key')
-output storageAccountKey string = blobstore.listKeys().keys[0].value
 
 @description('Log Analytics workspace ID')
 output workspaceId string = logAnalyticsWorkspace.properties.customerId
