@@ -24,7 +24,7 @@ export default function() {
 
   check(res, { 'status was 200': r => r.status == 200 });
 
-  console.log(`Created order: ${payload.data.orderId} => $(res.status}: ${res.status_test}`);
+  console.log(`Created order: ${payload.data.orderId} => ${res.status}: ${res.status_text}`);
 
   sleep(0.5);
 }
