@@ -28,10 +28,10 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
 
     configuration: {
 
-      // dapr: {
-      //   enabled: true
-      //   appProtocol: 'http'
-      // }
+      dapr: {
+        enabled: true
+        appId: 'pythonapp'
+      }
       
       secrets: [
         {

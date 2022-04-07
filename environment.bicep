@@ -8,6 +8,8 @@ var suffix = '${take(uniqueString(resourceGroup().id, environmentName), 5)}'
 var logAnalyticsWorkspaceName = 'logs-${environmentName}'
 var appInsightsName = 'appins-${environmentName}'
 var acrName = '${environmentName}${suffix}'
+var storageAccountName = '${environmentName}${suffix}'
+var storageContainerName = 'orders'
 
 resource acr 'Microsoft.ContainerRegistry/registries@2021-08-01-preview' = {
   name: acrName
@@ -20,15 +22,22 @@ resource acr 'Microsoft.ContainerRegistry/registries@2021-08-01-preview' = {
   }
 }
 
-resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2020-08-01' = {
+resource blobstore 'Microsoft.Storage/storageAccounts@2021-06-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+}
+
+resource logAnalyticsWorkspace'Microsoft.OperationalInsights/workspaces@2020-03-01-preview' = {
   name: logAnalyticsWorkspaceName
   location: location
   properties: any({
     retentionInDays: 30
     features: {
       searchVersion: 1
-      legacy: 0
-      enableLogAccessUsingOnlyResourcePermissions: true
     }
     sku: {
       name: 'PerGB2018'
@@ -36,31 +45,60 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2020-08
   })
 }
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02-preview' = {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: appInsightsName
   location: location
   kind: 'web'
-  properties: { 
-    ApplicationId: appInsightsName
+  properties: {
     Application_Type: 'web'
-    Flow_Type: 'Redfield'
-    Request_Source: 'CustomDeployment'
+    WorkspaceResourceId: logAnalyticsWorkspace.id
   }
 }
 
 resource environment 'Microsoft.App/managedEnvironments@2022-01-01-preview' = {
   name: environmentName
   location: location
-
   properties: {
-    daprAIInstrumentationKey: appInsights.properties.InstrumentationKey
-    
+    daprAIInstrumentationKey: reference(appInsights.id, '2020-02-02').InstrumentationKey
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
-        customerId: logAnalyticsWorkspace.properties.customerId
-        sharedKey: logAnalyticsWorkspace.listKeys().primarySharedKey
+        customerId: reference(logAnalyticsWorkspace.id, '2020-03-01-preview').customerId
+        sharedKey: listKeys(logAnalyticsWorkspace.id, '2020-03-01-preview').primarySharedKey
       }
+    }
+  }
+  
+  resource daprComponent 'daprComponents@2022-01-01-preview' = {
+    name: 'statestore'
+    properties: {
+      componentType: 'state.azure.blobstorage'
+      version: 'v1'
+      ignoreErrors: false
+      initTimeout: '5s'
+      secrets: [
+        {
+          name: 'storageaccountkey'
+          value: listKeys(resourceId('Microsoft.Storage/storageAccounts/', storageAccountName), '2021-09-01').keys[0].value
+        }
+      ]
+      metadata: [
+        {
+          name: 'accountName'
+          value: storageAccountName
+        }
+        {
+          name: 'containerName'
+          value: storageContainerName
+        }
+        {
+          name: 'accountKey'
+          secretRef: 'storageaccountkey'
+        }
+      ]
+      scopes: [
+        'nodeapp'
+      ]
     }
   }
 }

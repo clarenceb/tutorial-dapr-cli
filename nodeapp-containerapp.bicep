@@ -30,14 +30,16 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
       ingress: {
         external: true
         targetPort: 3000
-        allowInsecure: false
       }
 
-      // dapr: {
-      //   enabled: true
-      //   appPort: 3000
-      //   appProtocol: 'http'
-      // }
+      activeRevisionsMode: 'multiple'
+
+      dapr: {
+        enabled: true
+        appId: 'nodeapp'
+        appProtocol: 'http'
+        appPort: 3000
+      }
 
       secrets: [
         {
@@ -67,7 +69,7 @@ resource nodeapp 'Microsoft.App/containerApps@2022-01-01-preview' = {
             }
             {
               name: 'PERSIST_ORDERS'
-              value: 'false'
+              value: 'true'
             }
           ]
           resources: {
